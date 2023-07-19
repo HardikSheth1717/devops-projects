@@ -1,0 +1,292 @@
+- name: Install and configure NodeJS 18.x
+  hosts: webservers
+  become: yes
+  tasks:
+    - name: Remove other apt sources
+      command: rm -rf /var/lib/apt/lists/*
+
+    - name: Remove other apt sources
+      command: rm -rf /etc/apt/sources.list.d/*
+
+    - name: Add Node.js repository
+      shell: curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
+
+    - name: Update apt cache again
+      apt:
+        update_cache: yes
+
+    - name: Install Node.js 18
+      apt:
+        name: nodejs
+        dpkg_options: 'force-overwrite'
+        state: latest
+
+- name: Install and configure Nginx
+  hosts: webservers
+  become: yes
+  vars_files:
+    - variables.yaml
+  tasks:
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+
+    - name: Install Nginx
+      apt:
+        name: nginx
+        dpkg_options: 'force-overwrite'
+        state: latest
+
+    - name: Start Nginx service
+      service:
+        name: nginx
+        enabled: true
+        state: started
+
+    - name: Generate and copy nginx config file
+      template:
+        src: ./templates/nginx.template
+        dest: /etc/nginx/sites-enabled/default
+
+    - name: Reload nginx service
+      command: systemctl reload nginx
+
+- name: Install PM2
+  hosts: webservers
+  become: yes
+  tasks:
+    - name: Install PM2 node.js package globally.
+      community.general.npm:
+        name: pm2
+        global: true
+
+- name: Install Docker Engine
+  hosts: webservers
+  become: yes
+  tasks:
+    - name: Update apt sources
+      apt:
+        update_cache: yes
+
+    - name: Remove invalid Docker repository
+      file:
+        path: /etc/apt/sources.list.d/docker.list
+        state: absent
+      ignore_errors: yes
+
+    - name: Install required packages
+      apt:
+        pkg:
+          - ca-certificates
+          - curl
+          - gnupg
+        state: latest
+        update_cache: true
+
+    - name: Add Docker GPG apt Key
+      apt_key:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        state: present
+
+    - name: Add Docker Repository
+      apt_repository:
+        repo: deb https://download.docker.com/linux/ubuntu focal stable
+        state: present
+
+    - name: Update apt and install docker-ce
+      apt:
+        name: docker-ce
+        state: latest
+        update_cache: true
+
+    - name: Add user to the docker group
+      user:
+        name: ubuntu
+        groups: docker
+        append: yes
+
+- name: Install and setup certbot for SSL certificates
+  hosts: webservers
+  become: yes
+  tasks:
+    - name: Update apt sources
+      apt:
+        update_cache: yes
+
+    - name: Install required packages
+      apt:
+        pkg:
+          - certbot
+          - python3-certbot-nginx
+        state: latest
+        update_cache: true
+
+    - name: Download acme-dns-auth.py file
+      ansible.builtin.get_url:
+        url: https://github.com/joohoi/acme-dns-certbot-joohoi/raw/master/acme-dns-auth.py
+        dest: /home/ubuntu
+        mode: +x
+
+    - name: Replace python version with 3.
+      command: sed -i -e 's/python/python3/g' /home/ubuntu/acme-dns-auth.py
+
+    - name: Copy file to certbot folder.
+      copy:
+        src: /home/ubuntu/acme-dns-auth.py
+        dest: /etc/letsencrypt
+        remote_src: true
+
+- name: Install and configure Firewall
+  hosts: webservers
+  become: yes
+  tasks:
+    - name: Enable ufw
+      community.general.ufw:
+        state: enabled
+
+    - name: Allow OpenSSH
+      community.general.ufw:
+        rule: allow
+        name: 'OpenSSH'
+
+    - name: Allow Nginx
+      community.general.ufw:
+        rule: allow
+        name: 'Nginx Full'
+
+    - name: Allow application ports - 3000
+      community.general.ufw:
+        rule: allow
+        port: 3000
+        proto: tcp
+
+    - name: Allow application ports - 4000
+      community.general.ufw:
+        rule: allow
+        port: 4000
+        proto: tcp
+
+- name: Deploy Redis container
+  hosts: webservers
+  become: yes
+  tasks:
+    - name: Create a redis container
+      community.docker.docker_container:
+        name: redis-db-dev
+        image: redis
+        pull: true
+        command: redis-server --appendonly yes --requirepass Admin123
+        state: started
+        ports:
+          - "6379:6379"
+
+- name: Clone the project repositories
+  hosts: webservers
+  become: yes
+  vars_files:
+    - variables.yaml
+  tasks:
+    # - name: Generate SSH key
+    #   community.crypto.openssh_keypair:
+    #     path: /home/ubuntu/.ssh/id_rsa
+    #     regenerate: "never"
+    #     type: rsa
+    #     size: 4096
+    #   register: ssh_key
+
+    # - name: Display public key
+    #   debug:
+    #     var: ssh_key.public_key
+
+    # - name: Copy public key
+    #   pause:
+    #     prompt: "Copy above displayed public key and paste it in Github and generate SSH key. Once done, press enter..."
+
+    - name: Check if NestJS directory exists
+      stat:
+        path: /home/ubuntu/releases/devops-nestjs-app
+      register: nest_directory_check
+
+    - name: Restore all the chages so that next time Ansible can clone without any error.
+      command: git restore .
+      args:
+        chdir: /home/ubuntu/releases/devops-nestjs-app
+      when: nest_directory_check.stat.exists
+        
+    - name: Check if ReactJs directory exists
+      stat:
+        path: /home/ubuntu/releases/devops-reactjs-app
+      register: react_directory_check
+
+    - name: Restore all the chages so that next time Ansible can clone without any error.
+      command: git restore .
+      args:
+        chdir: /home/ubuntu/releases/devops-reactjs-app
+      when: react_directory_check.stat.exists
+
+    - name: Clone the reactjs project repository.
+      ansible.builtin.git:
+        repo: https://github.com/HardikSheth1717/devops-reactjs-app.git
+        dest: /home/ubuntu/releases/devops-reactjs-app
+        single_branch: yes
+        version: master
+
+    - name: Clone the nestjs project repository.
+      ansible.builtin.git:
+        repo: https://github.com/HardikSheth1717/devops-nestjs-app.git
+        dest: /home/ubuntu/releases/devops-nestjs-app
+        single_branch: yes
+        version: master
+
+    - name: Generate and copy .env file for Nest
+      template:
+        src: ./templates/nest.env.template
+        dest: /home/ubuntu/releases/devops-nestjs-app/.env.development
+        
+    - name: Generate and copy .env file for React
+      template:
+        src: ./templates/react.env.template
+        dest: /home/ubuntu/releases/devops-reactjs-app/.env
+
+- name: Create processes for react application in PM2
+  hosts: webservers
+  become: yes
+  tasks:
+    - name: Install serve npm packages.
+      command: npm install -g serve
+      args:
+        chdir: /home/ubuntu/releases/devops-reactjs-app
+
+    - name: Install npm packages.
+      command: npm install
+      args:
+        chdir: /home/ubuntu/releases/devops-reactjs-app
+
+    - name: Build react app.
+      command: npm run build
+      args:
+        chdir: /home/ubuntu/releases/devops-reactjs-app
+
+    - name: Create process for react app.
+      command: pm2 start ecosystem.config.js --env development
+      args:
+        chdir: /home/ubuntu/releases/devops-reactjs-app
+
+- name: Create processes for nest applications in PM2
+  hosts: webservers
+  become: yes
+  tasks:
+    - name: Install npm packages.
+      command: npm install
+      args:
+        chdir: /home/ubuntu/releases/devops-nestjs-app
+
+    - name: Build nest app.
+      command: npm run build
+      args:
+        chdir: /home/ubuntu/releases/devops-nestjs-app
+
+    - name: Create process for nest app.
+      command: pm2 start ecosystem.config.js --env development
+      args:
+        chdir: /home/ubuntu/releases/devops-nestjs-app

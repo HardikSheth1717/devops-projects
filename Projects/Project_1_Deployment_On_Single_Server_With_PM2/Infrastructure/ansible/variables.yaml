@@ -1,0 +1,12 @@
+rds_host: mysql-db.cwgvbm8hg8yn.ap-south-1.rds.amazonaws.com
+rds_user: admin
+rds_password: Semaphore123
+rds_database: semaphore
+rds_port: 3306
+redis_host: localhost
+redis_port: 6379
+redis_password: Admin123
+nestapi_url: http://semaphore-technologies.com/api/v1
+reactapp_port: 3000
+nestapi_port: 4000
+host_site_name: semaphore-technologies.com
