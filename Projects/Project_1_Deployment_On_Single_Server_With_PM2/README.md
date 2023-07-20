@@ -256,4 +256,5 @@ pm2 ls
 ```
 <i>Note: Use sudo if your user do not have permissions.</i>
 
-Now, if you check with your public ip address, the react application will be accessible. Our next you can configure any domain so that it will point to `web-server`. This step is optional.
+Now, if you check with your public ip address, the react application will be accessible. Our next you can configure any domain so that it will point to `web-server` and SSL certificate using certbot. This steps are optional.
+
