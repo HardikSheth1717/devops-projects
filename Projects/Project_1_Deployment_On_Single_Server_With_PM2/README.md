@@ -52,12 +52,12 @@ In this section, we will setup the deployment infrastructure on AWS using Terraf
 
 Let's start. First of all, we need to generate SSH keys to connect our EC2 instances.
 
-### Create key pairs on AWS to connect newly created servers
+### Generate key pairs and import in AWS to connect newly created servers
 <br>
 
 **Step 1 - Generate SSH key pair**
 
-Generate an SSH key pair if you don't already have one. You can use tools like `ssh-keygen` to generate an SSH key pair.
+Generate an SSH key pairs in your local machine if you don't already have one. You can use tools like `ssh-keygen` to generate an SSH key pair.
 
 ```
 ssh-keygen -t rsa -b 4096 -C "your_email@example.com"
@@ -67,14 +67,14 @@ This command generates an RSA key pair with a key size of 4096 bits. Replace "yo
 
 **Step 2 - Import key pairs in AWS**
 
-Upload the public key to AWS. In the AWS Management Console, go to the EC2 service, select "Key Pairs" in the navigation panel, and click "Import Key Pair." Provide a name for the key pair `my-new-pk` and paste the contents of the public key file (id_rsa.pub by default) into the "Public Key Contents" field.
+Upload the public key to AWS. In the AWS Management Console, go to the EC2 service, select "Key Pairs" in the navigation panel, and click "Import Key Pair". Provide a name for the key pair `my-new-pk` and paste the contents of the public key file (`id_rsa.pub` by default) into the "Public Key Contents" field.
 
-<i>Please make sure to use `my-new-pk` name for the key pair. If you want to use different name, then you have to update `key_name` field in `./Infrastructure/terraform/aws/ec2.tf`.</i>
+<i>Please make sure to use `my-new-pk` name for the key pair. If you want to use different name, then you have to update `key_name` field in `./Infrastructure/terraform/aws/ec2.tf` file.</i>
 
-### Create EC2 instance with Terraform
+### Create the deployment infrastructure on AWS with Terraform
 
 
-You can find the Terraform script in `./Infrastructure/terraform/aws/`. This script will create two EC2 instances on AWS. 
+You can find the Terraform scripts in `./Infrastructure/terraform/aws/`. This scripts will create the deployment infrastructure on AWS. 
 
 Please follow below commands to execute the Terraform script:
 
@@ -90,17 +90,27 @@ Next, create a plan to review the deployment changes.
 terraform plan
 ```
 
-Finally, if everything looks good, apply changes and create the EC2 instances.
+Finally, if everything looks good, apply changes and create the deployment infrastructure on AWS.
 
 ```
 terraform apply
 ```
 
-After the successful creation of EC2 instances, Terraform will print instance id, public IP and private IP addresses of the newly created EC2 instances.
+After the successful execution of the script, Terraform will print instance id, public IP and private IP addresses of the newly created EC2 instances and instance id and public endpoint of the MySQL RDS.
 
-Terraform will create below two EC2 instances:
-1. `controlplane-server` - This server will be used to manage and configure our deployment server. Terraform has already installed Ansible on this server.
-2. `web-server` - This server will be used to deploy our applications.
+Terraform will create below resources on AWS:
+1. `semaphore-vpc` - A virtual private cloud in which our Dev/Test environment will be deployed.
+2. `semaphore-igw` - An internet gateway.
+3. `semaphore-subnet-z1` and `semaphore-subnet-z2` - Two subnets, each in two different availability zones.
+4. `semaphore-rt` - A route table.
+5. `semaphore-route` - A route for internet gateway.
+6. `semaphore-zone1-route-association` and `semaphore-zone2-route-association` - Route table mappings for both the subnets.
+7. `ec2-instance-sg` - A security group for the EC2 instances.
+8. `rds-instance-sg` - A security group for the RDS instance.
+9. `rds-subnet-group` - A subnet group for RDS.
+10. `controlplane-server` - This server will be used to manage and configure our deployment server. Terraform has already installed Ansible on this server.
+11. `web-server` - This server will be used to deploy our applications.
+12. `mysql-server` - An RDS instance for MySQL database.
 
 Next, connect `controlplane-server` server using SSH from your local machine and double check that Ansible is installed correctly by executing below command:
 
@@ -127,7 +137,7 @@ Once the command is completed, it will generate private and public keys in `<you
 
 **Step 2 - Copy public key to `web-server` server**
 
-Now, we have to copy the public key to our `web-server` server, on which we are going to host our application.
+Now, we have to copy the public key to our `web-server` server, on which we are going to host our applications.
 
 First, copy public key contents from `id_rsa.pub` file.
 
@@ -165,7 +175,7 @@ ssh username@app_server_address
 ### Configure Ansible inventory file on `controlplane-server` server
 <br>
 
-In our case, Terraform has already installed Ansible and updated the inventory file on the `controlplane-server` server. So, you don't need follow steps 1-3, just follow step 4. But you can update inventory file manually by following steps 1-3.
+In our case, Terraform has already installed Ansible and updated the inventory file on the `controlplane-server` server. So, you don't need to follow steps 1-3, just follow step 4. But you can update inventory file manually by following steps 1-3.
 
 **Step 1 - Update inventory file**
 
@@ -188,9 +198,9 @@ Here, I have defined a group named <b>webservers</b> and added our web server in
 
 **Step 3 - Verify the inventory file**
 
-Execute below commond to verify the inventory file configuration.
+Execute below command to verify the inventory file configuration.
 
-```ansible-inventory --list -y```
+```ansible-inventory --list```
 
 The output of above command must display the server information which we have configured in the previous step.
 
@@ -218,11 +228,13 @@ web-server | SUCCESS => {
 
 ### Transfer Ansible files on `controlplane-server` server
 
-Next, we have create Ansible playbook to configure our web server. We will transfer `./Infrastructure/ansible/` folder on the `controlplane-server` server.
+Next, we have created an Ansible playbook to configure our web server. We will transfer `./Infrastructure/ansible/` folder on the `controlplane-server` server using below command.
 
 ```
 scp -i C:\Users\<your-users-folder>\.ssh\aws -r ..\..\ansible\ ubuntu@<public_ip_address>:/home/ubuntu
 ```
+
+Here, you have to replace the name of the SSH private key `aws` with your name (mostly id_rsa) in -i option of `spc` command.
 
 ### Setup newly created server using Ansible
 <br>
@@ -243,6 +255,8 @@ Now, SSH in to `controlplane-server` server and navigate to `/home/<your_user_na
 
 Now, before executing the playbook, you have to change the values of the Ansible variables in `variables.yaml` file. Mainly, you have to change `rds_host`, `nestapi_url` and `host_site_name`. All other variables are optional. You will get `rds_host` from Terraform's output variables.
 
+<i>Note: I have hosted my applications on the domain https://semaphore-technologies.com in this tutorial. If you want to access your website with just IP address then you have to modify `nestapi_url` and `host_site_name` parameters and replace them with your IP address.</i>
+
 Once you update the variables according to your needs, execute below command to run the playbook.
 
 ```
@@ -256,5 +270,27 @@ pm2 ls
 ```
 <i>Note: Use sudo if your user do not have permissions.</i>
 
-Now, if you check with your public ip address, the react application will be accessible. Our next you can configure any domain so that it will point to `web-server` and SSL certificate using certbot. This steps are optional.
+Now, if you check with your public ip address, the react application will be accessible. Next, you can configure any domain so that it will point to `web-server` and SSL certificate using certbot. This steps are optional.
 
+<i>Note: I have hosted my applications on the domain https://semaphore-technologies.com in this tutorial. So, I have configured my Nginx config file accordingly. If you want to access your website with just IP address then you have to modify line number 10 in `/home/<your_user_name>/ansible/templates/nginx.template` file, just replace domain name with `localhost`. :relaxed:</i>
+
+
+### Configure SSL certificate with certbot on `web-server` server
+
+We have already installed `certbot` on the `web-server` server using Ansible. Now, navigate to this directory `/etc/letsencrypt`.
+
+```
+cd /etc/letsencrypt
+```
+
+Now, execute below command to run certbot.
+
+```
+certbot
+```
+
+After executing this command, it will prompt you couple of question. Once done, it will generate a dns challange. You need to add the given CNAME record in your domain's dns management so that certbot can verify your authority for that particular domain. After adding CNAME record, wait for few minutes so that record will be updated on most of the dns server (use https://dnschecker.org/).
+
+Once done, hit enter, it will show you the list of domains you have configured in the Nginx configuration file. Just hit enter, to generate SSL for all the domains and you'r done! :sunglasses:
+
+Just check your website in the browser. It will also add HTTP to HTTPS redirect rules for you. :fire:
